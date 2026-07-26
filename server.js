@@ -25,9 +25,9 @@ app.get('/api/customers', async (req, res) => {
             data: result.rows
         });
     } catch (err) {
-        console.err(err);
+        console.error(err.message);
 
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).send('Server Error');
     }
 });
 
