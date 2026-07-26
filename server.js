@@ -84,6 +84,25 @@ app.delete('/api/customers/:id', async (req, res) => {
     }
 });
 
+// 5. TOGGLE STATUS ONLY (PATCH)
+app.patch('/api/customers/:id/status', async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+    try {
+        const result = await pool.query(
+            `UPDATE customers SET status = $1 WHERE id = $2 RETURNING *`,
+            [status, id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Customer not found' });
+        }
+        res.json({ success: true, data: result.rows[0] });
+    } catch (err) {
+        console.error("Patch Error:", err.message);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
