@@ -40,13 +40,17 @@ app.listen(PORT, () => {
 app.post('/api/customers', async (req, res) => {
     const { name, email, phone, status, user_id, website } = req.body;
     try {
-        const result = await pool.query(`INSERT INTO customers (name, email, phone, status, user_id, website)
-            VALUES($1, $2, $3, $4, $5, $6) RETURING *`, 
+        const result = await pool.query(
+            `INSERT INTO customers (name, email, phone, status, user_id, website)
+            VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
             [name, email, phone, status || 'active', user_id, website]
         );
+
         res.status(201).json({ success: true, data: result.rows[0] });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        console.error("Postgre Error:", err.message);
+
+        res.status(500).json({ success: false, error: err.message })
     }
 }); 
 
