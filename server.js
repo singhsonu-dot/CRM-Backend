@@ -103,6 +103,44 @@ app.patch('/api/customers/:id/status', async (req, res) => {
     }
 });
 
+// 6. GET ANALYTICS DATA
+app.get('/api/analytics', async (req, res) => {
+    try {
+        const totalRes = await pool.query('SELECT COUNT(*) FROM customers');
+        const activeRes = await pool.query("SELECT COUNT(*) FROM customers WHERE status = 'active'");
+
+        const totalCustomers = parseInt(totalRes.rows[0].count) || 0;
+        const activeCustomers = parseInt(activeRes.rows[0].count) || 0;
+
+        const analyticsData = {
+            totalCustomers,
+            activeCustomers,
+            revenue: `$${totalCustomers * 1000}`,
+            growth: `+${totalCustomers * 2}%`,
+            customerChart: [
+                { month: "Jan", customers: Math.max(1, totalCustomers - 3) },
+                { month: "Feb", customers: Math.max(2, totalCustomers - 2) },
+                { month: "Mar", customers: Math.max(3, totalCustomers - 1) },
+                { month: "Apr", customers: totalCustomers },
+            ],
+            revenueChart: [
+                { week: "Mon", subscriptions: totalCustomers * 100, services: 40, support: 30 }, 
+                { week: "Tue", subscriptions: totalCustomers * 120, services: 50, support: 40 },
+                { week: "Wed", subscriptions: totalCustomers * 150, services: 60, support: 50 },
+                { week: "Thu", subscriptions: totalCustomers * 180, services: 70, support: 60 },
+                { week: "Fri", subscriptions: totalCustomers * 200, services: 90, support: 70 },
+            ]
+        };
+
+        res.json({ success: true, data: analyticsData });
+    } catch (err) {
+        console.error("Analytics Error:", err.message);
+
+        res.status(500).json({ success: false, error: err.message });
+    }
+}); 
+
+// SERVER LISTEN 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
