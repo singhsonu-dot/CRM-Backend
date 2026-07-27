@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
+const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
 const app = express();
@@ -17,8 +18,43 @@ pool.on('connect', () => {
     console.log('Connected to PostgreSQL Database!');
 });
 
+const supabase = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_KEY
+);
+
+const verifyToken = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer')) {
+        return res.status(401).json({ success: false, error: 'Unauthorized: No token provided' })
+    }
+
+    const token = authHeader.split(' ')[1];
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+
+    if (error || !user) {
+        return res.status(401).json({ success: false, error: 'Invalid or expired token' })
+    }
+
+    req.user = user;
+    next();
+};
+
+const checkRole = (allowedRoles) => {
+    return (req, res, next) => {
+        const userRole = req.user?.app_metadata?.role || req.user?.user_metadata?.role || 'user';
+
+        if (!allowedRoles.includes(userRole)) {
+            return res.status(403).json({ success: false, error: 'Forbidden: Access denied for your role'});
+        }
+        next();
+
+    };
+};
+
 // 1. GET ALL CUSTOMERS
-app.get('/api/customers', async (req, res) => {
+app.get('/api/customers', verifyToken, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM customers ORDER BY id DESC');
         res.json({
@@ -32,7 +68,7 @@ app.get('/api/customers', async (req, res) => {
 });
 
 // 2. ADD NEW CUSTOMER (POST)
-app.post('/api/customers', async (req, res) => {
+app.post('/api/customers', verifyToken, async (req, res) => {
     const { name, email, phone, status, user_id, website } = req.body;
     try {
         const result = await pool.query(
@@ -49,7 +85,7 @@ app.post('/api/customers', async (req, res) => {
 });
 
 // 3. UPDATE CUSTOMER (PUT)
-app.put('/api/customers/:id', async (req, res) => {
+app.put('/api/customers/:id', verifyToken, async (req, res) => {
     const { id } = req.params;
     const { name, email, phone, status, website } = req.body;
     try {
@@ -73,7 +109,7 @@ app.put('/api/customers/:id', async (req, res) => {
 });
 
 // 4. DELETE CUSTOMER (DELETE)
-app.delete('/api/customers/:id', async (req, res) => {
+app.delete('/api/customers/:id', verifyToken, checkRole(['admin']), async (req, res) => {
     const { id } = req.params;
     try {
         await pool.query('DELETE FROM customers WHERE id = $1', [id]);
@@ -85,7 +121,7 @@ app.delete('/api/customers/:id', async (req, res) => {
 });
 
 // 5. TOGGLE STATUS ONLY (PATCH)
-app.patch('/api/customers/:id/status', async (req, res) => {
+app.patch('/api/customers/:id/status', verifyToken, async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
     try {
@@ -104,7 +140,7 @@ app.patch('/api/customers/:id/status', async (req, res) => {
 });
 
 // 6. GET ANALYTICS DATA WITH DYNAMIC RANGE FILTERING
-app.get('/api/analytics', async (req, res) => {
+app.get('/api/analytics', verifyToken, async (req, res) => {
     try {
         const range = req.query.range || 'Last 7 Days';
         
