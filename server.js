@@ -4,6 +4,10 @@ const { Pool } = require('pg');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
+const Razorpay = require('razorpay');
+const crypto = require('crypto'); 
+const { receiveMessageOnPort } = require('worker_threads');
+
 const app = express();
 
 app.use(cors());
@@ -21,7 +25,12 @@ pool.on('connect', () => {
 const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_KEY
-);
+); 
+
+const razorpay = new Razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_KEY_SECRET
+});
 
 const verifyToken = async (req, res, next) => {
     const authHeader = req.headers.authorization;
@@ -211,6 +220,93 @@ app.get('/api/analytics', verifyToken, async (req, res) => {
     } catch (err) {
         console.error("Analytics Error:", err.message);
         res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Endpoint 1: Create Razorpay Order
+app.post('/api/subscription/create-order', verifyToken, async (req, res) => {
+    try {
+        const { plan } = req.body;
+        let amount = 0;
+
+        if (plan === 'pro') amount = 2900;
+        if (plan === 'enterprise') amount = 9900;
+
+        if (amount === 0) {
+            return res.status(400).json({ success: false, error: "Free plan does not require payment" });
+        }
+
+        const options = {
+            amount: amount * 100,
+            currency: "INR",
+            receipt: `receipt_${Date.now()}`,
+            notes: {
+                user_id: req.user.id,
+                plan_type: plan
+            }
+        };
+
+        const order = await razorpay.orders.create(options);
+        res.json({ success: true, order, key: process.env.RAZORPAY_KEY_ID });
+    } catch (err) {
+        console.error("Order Creation Error:", err.message);
+        res.status(500).json({ success: false, error: err.message });
+    }
+}); 
+
+// Endpoint 2: Verify Payment & Upgrade Plan
+app.post('/api/subscription/verify-payment', verifyToken, async (req, res) => {
+    try {
+        const { razorpay_order_id, razorpay_payment_id, razorpay_signature, plan } = req.body;
+
+        // 1. Signature Verify 
+        const body = razorpay_order_id + "|" + razorpay_payment_id;
+        const expectedSignature = crypto
+            .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+            .update(body.toString())
+            .digest('hex');
+
+        if (expectedSignature !== razorpay_signature) {
+            return res.status(400).json({ success: false, error: "Invalid payment signature!" });
+        }
+
+        // 2. Limit calculate 
+        let customerLimit = 10;
+        if (plan === 'pro') customerLimit = 100;
+        if (plan === 'enterprise') customerLimit = 999999;
+
+        // 3. Simple Clean DB Update Query (No fallback, direct users table)
+        await pool.query(
+            'UPDATE customers SET plan = $1, customer_limit = $2 WHERE user_id = $3',
+            [plan, customerLimit, req.user.id]
+        );
+
+        return res.json({ success: true, message: `Successfully upgraded to ${plan.toUpperCase()} plan!` });
+
+    } catch (err) {
+        console.error("Verify Payment Error:", err.message);
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Current plan fetch karne ke liye API
+app.get('/api/subscription/current-plan', verifyToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        const result = await pool.query(
+            'SELECT plan FROM customers WHERE user_id = $1 LIMIT 1',
+            [userId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.json({ plan: 'free' }); // Default plan agar user na mile
+        }
+
+        res.json({ plan: result.rows[0].plan || 'free' });
+    } catch (error) {
+        console.error("Error fetching plan:", error);
+        res.status(500).json({ error: "Server error" });
     }
 });
 
