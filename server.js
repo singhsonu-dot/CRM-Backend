@@ -8,6 +8,8 @@ const Razorpay = require('razorpay');
 const crypto = require('crypto'); 
 const { receiveMessageOnPort } = require('worker_threads');
 
+const nodemailer = require("nodemailer")
+
 const app = express();
 
 app.use(cors());
@@ -32,6 +34,14 @@ const razorpay = new Razorpay({
     key_secret: process.env.RAZORPAY_KEY_SECRET
 });
 
+const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS, 
+    },
+}); 
+
 const verifyToken = async (req, res, next) => {
     const authHeader = req.headers.authorization;
 
@@ -52,7 +62,10 @@ const verifyToken = async (req, res, next) => {
 
 const checkRole = (allowedRoles) => {
     return (req, res, next) => {
+        console.log("App Metadata Role:", req.user?.app_metadata?.role)
+        console.log("User Metadata Role:", req.user?.user_metadata?.role)
         const userRole = req.user?.app_metadata?.role || req.user?.user_metadata?.role || 'user';
+        console.log("Final Extracted Role:", userRole)
 
         if (!allowedRoles.includes(userRole)) {
             return res.status(403).json({ success: false, error: 'Forbidden: Access denied for your role'});
@@ -307,6 +320,43 @@ app.get('/api/subscription/current-plan', verifyToken, async (req, res) => {
     } catch (error) {
         console.error("Error fetching plan:", error);
         res.status(500).json({ error: "Server error" });
+    }
+});
+
+// Email Route
+app.post("/api/v1/send-email", async (req, res) => {
+    const { to, subject, message } = req.body 
+
+    try {
+        const mailOptions = {
+            from: `"CRM Dashboard" <${process.env.EMAIL_USER}>`,
+            to: to || process.env.EMAIL_USER,
+            subject: subject || "CRM Notification Alert",
+            html: `
+                <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+                    <h2 style="color: #2563eb;">CRM Notification Alert</h2>
+                    <p style="font-size: 15px; color: #333;">${message || "Your setting/notification preference was updated successfully!"}</p>
+                    <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
+                    <p style="font-size: 12px; color: #888;">This is an automated test notification from your CRM Dashboard.</p>
+                </div>
+            `,
+        };
+
+        const info = await transporter.sendMail(mailOptions) 
+        console.log("Email sent: ", info.messageId)
+
+        return res.status(200).json({
+            success: true,
+            message: "Email sent successfully!",
+            messageId: info.messageId
+        });
+    } catch (error) {
+        console.error("Nodemailer Error: ", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to send email alert",
+            error: error.message
+        });
     }
 });
 
