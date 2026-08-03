@@ -78,7 +78,8 @@ const checkRole = (allowedRoles) => {
 // 1. GET ALL CUSTOMERS
 app.get('/api/customers', verifyToken, async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM customers ORDER BY id DESC');
+        const currentUserId = req.user.id 
+        const result = await pool.query('SELECT * FROM customers WHERE user_id =$1 ORDER BY id DESC', [currentUserId]); 
         res.json({
             success: true,
             data: result.rows
@@ -91,12 +92,13 @@ app.get('/api/customers', verifyToken, async (req, res) => {
 
 // 2. ADD NEW CUSTOMER (POST)
 app.post('/api/customers', verifyToken, async (req, res) => {
-    const { name, email, phone, status, user_id, website } = req.body;
+    const { name, email, phone, status, website } = req.body;
+    const currentUserId = req.user.id 
     try {
         const result = await pool.query(
             `INSERT INTO customers (name, email, phone, status, user_id, website)
              VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-            [name, email, phone, status || 'active', user_id, website]
+            [name, email, phone, status || 'active', currentUserId, website]
         );
 
         res.status(201).json({ success: true, data: result.rows[0] });
@@ -114,9 +116,9 @@ app.put('/api/customers/:id', verifyToken, async (req, res) => {
         const result = await pool.query(
             `UPDATE customers
              SET name = $1, email = $2, phone = $3, status = $4, website = $5
-             WHERE id = $6 
+             WHERE id = $6 AND user_id = $7
              RETURNING *`,
-            [name, email, phone, status, website, id]
+            [name, email, phone, status, website, id, req.user.id]
         );
 
         if (result.rows.length === 0) {
@@ -132,15 +134,23 @@ app.put('/api/customers/:id', verifyToken, async (req, res) => {
 
 // 4. DELETE CUSTOMER (DELETE)
 app.delete('/api/customers/:id', verifyToken, checkRole(['admin']), async (req, res) => {
-    const { id } = req.params;
-    try {
-        await pool.query('DELETE FROM customers WHERE id = $1', [id]);
-        res.json({ success: true, message: 'Customer deleted successfully' });
+    const { id } = req.params
+    try{
+        const result = await pool.query(
+            'DELETE FROM customers WHERE id = $1 AND user_id = $2 RETURNING *', 
+            [id, req.user.id]
+        )
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Customer not found or unauthorized' })
+        }
+
+        res.json({ success: true, message: 'Customer deleted successfully' })
     } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ success: false, error: err.message });
+        console.error(err.message)
+        res.status(500).json({ success: false, error: err.message})
     }
-});
+})
 
 // 5. TOGGLE STATUS ONLY (PATCH)
 app.patch('/api/customers/:id/status', verifyToken, async (req, res) => {
@@ -148,11 +158,11 @@ app.patch('/api/customers/:id/status', verifyToken, async (req, res) => {
     const { status } = req.body;
     try {
         const result = await pool.query(
-            `UPDATE customers SET status = $1 WHERE id = $2 RETURNING *`,
-            [status, id]
+            `UPDATE customers SET status = $1 WHERE id = $2 AND user_id = $3 RETURNING *`,
+            [status, id, req.user.id]
         );
         if (result.rows.length === 0) {
-            return res.status(404).json({ success: false, error: 'Customer not found' });
+            return res.status(404).json({ success: false, error: 'Customer not found or unauthorized' });
         }
         res.json({ success: true, data: result.rows[0] });
     } catch (err) {
@@ -166,8 +176,8 @@ app.get('/api/analytics', verifyToken, async (req, res) => {
     try {
         const range = req.query.range || 'Last 7 Days';
         
-        const totalRes = await pool.query('SELECT COUNT(*) FROM customers');
-        const activeRes = await pool.query("SELECT COUNT(*) FROM customers WHERE status = 'active'");
+        const totalRes = await pool.query('SELECT COUNT(*) FROM customers WHERE user_id =$1', [req.user.id]);
+        const activeRes = await pool.query("SELECT COUNT(*) FROM customers WHERE status = 'active' AND user_id = $1", [req.user.id]);
         
         const totalCustomers = parseInt(totalRes.rows[0].count) || 0;
         const activeCustomers = parseInt(activeRes.rows[0].count) || 0;
