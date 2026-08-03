@@ -133,7 +133,7 @@ app.put('/api/customers/:id', verifyToken, async (req, res) => {
 });
 
 // 4. DELETE CUSTOMER (DELETE)
-app.delete('/api/customers/:id', verifyToken, checkRole(['admin']), async (req, res) => {
+app.delete('/api/customers/:id', verifyToken, async (req, res) => {
     const { id } = req.params
     try{
         const result = await pool.query(
